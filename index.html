@@ -444,8 +444,8 @@
 // Cole a URL e a chave "anon public" do seu projeto (Supabase → Project Settings → API).
 // Essa chave é pública por natureza — quem protege os dados é a Row Level Security (RLS)
 // nas tabelas, configurada pelo script SQL fornecido junto com este arquivo.
-const SUPABASE_URL = "https://bdcwhalqakgtiajikoad.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJkY3doYWxxYWtndGlhamlrb2FkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk3MjU0MTYsImV4cCI6MjEwNTMwMTQxNn0.eWMuRV1EYb84mDkkJnIlo9JpBd9KYjnUkw12dAvmgSA";
+const SUPABASE_URL = "https://ndiaukuapniavluffmre.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_uh0Mzt79QRdOXZfc7mCRoA_qnhPP0-G";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let currentUser = null;
 </script>
@@ -726,6 +726,53 @@ async function doLogin() {
   }
 }
 
+// Recuperação de senha: o link do e-mail volta para esta página com type=recovery no endereço;
+// o Supabase cria a sessão sozinho e aqui mostramos a tela para cadastrar a senha nova.
+let modoRecuperacao = /type=recovery/.test(location.hash) || /type=recovery/.test(location.search);
+try {
+  sb.auth.onAuthStateChange((ev) => { if (ev === "PASSWORD_RECOVERY") { modoRecuperacao = true; renderNovaSenha(); } });
+} catch (e) { /* sem suporte */ }
+async function esqueciSenha() {
+  const email = document.getElementById("login-email").value.trim();
+  const errEl = document.getElementById("login-error");
+  const okEl = document.getElementById("login-ok");
+  errEl.textContent = ""; okEl.textContent = "";
+  if (!email) { errEl.textContent = "Digite seu e-mail acima e toque de novo em \"Esqueci minha senha\"."; return; }
+  try {
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    if (error) throw error;
+    okEl.textContent = "Pronto! Se esse e-mail estiver cadastrado, chega em instantes um link para criar uma senha nova (confira também o spam).";
+  } catch (e) {
+    errEl.textContent = "Não foi possível enviar agora. Espere alguns minutos e tente de novo.";
+  }
+}
+function renderNovaSenha() {
+  const app = document.getElementById("app");
+  app.innerHTML = `
+    <div class="login-box">
+      <div class="login-brand">${logoSymbol("logo-sym")}<span class="brand-name">Dashboard Veterinário</span><span class="brand-tag">Criar senha nova</span></div>
+      <p class="sub">Digite a senha nova duas vezes (mínimo 6 caracteres).</p>
+      <div class="login-error" id="login-error"></div>
+      <input type="password" id="nova-senha" class="field" placeholder="Senha nova" autocomplete="new-password" />
+      <input type="password" id="nova-senha2" class="field" placeholder="Repita a senha nova" autocomplete="new-password" />
+      <button class="btn btn-primary" id="nova-senha-btn">Salvar senha e entrar</button>
+    </div>`;
+  const salvar = async () => {
+    const s1 = document.getElementById("nova-senha").value, s2 = document.getElementById("nova-senha2").value;
+    const errEl = document.getElementById("login-error"), btn = document.getElementById("nova-senha-btn");
+    if (s1.length < 6) { errEl.textContent = "A senha precisa ter pelo menos 6 caracteres."; return; }
+    if (s1 !== s2) { errEl.textContent = "As duas senhas não são iguais."; return; }
+    btn.disabled = true; btn.textContent = "Salvando...";
+    const { error } = await sb.auth.updateUser({ password: s1 });
+    if (error) { errEl.textContent = "Não deu certo (o link pode ter expirado). Peça um novo em \"Esqueci minha senha\"."; btn.disabled = false; btn.textContent = "Salvar senha e entrar"; return; }
+    modoRecuperacao = false;
+    history.replaceState(null, "", location.pathname);
+    state.loading = true; render(); await loadData();
+  };
+  document.getElementById("nova-senha-btn").addEventListener("click", salvar);
+  document.getElementById("nova-senha2").addEventListener("keydown", (e) => { if (e.key === "Enter") salvar(); });
+}
+
 async function doLogout() {
   await sb.auth.signOut();
   currentUser = null;
@@ -742,8 +789,11 @@ function renderLogin() {
       <input type="email" id="login-email" class="field" placeholder="E-mail" autocomplete="username" />
       <input type="password" id="login-password" class="field" placeholder="Senha" autocomplete="current-password" />
       <button class="btn btn-primary" id="login-btn">Entrar</button>
+      <button type="button" class="btn btn-outline" id="login-esqueci" style="margin-top:6px;">Esqueci minha senha</button>
+      <div class="hint" id="login-ok" style="color:var(--green);margin-top:8px;"></div>
     </div>
   `;
+  document.getElementById("login-esqueci").addEventListener("click", esqueciSenha);
   document.getElementById("login-btn").addEventListener("click", doLogin);
   document.getElementById("login-password").addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
   document.getElementById("login-email").addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
@@ -755,6 +805,7 @@ function renderLogin() {
 async function loadData() {
   const authed = await checkAuth();
   if (!authed) { renderLogin(); return; }
+  if (modoRecuperacao) { renderNovaSenha(); return; }
   try {
     const { data, error } = await sb.from("app_state").select("data").eq("user_id", currentUser.id).maybeSingle();
     if (error) throw error;
